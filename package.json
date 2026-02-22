@@ -1,0 +1,13 @@
+{
+  "name": "a-share-ai-lab",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start:orchestrator": "node backend/server.mjs",
+    "start:bridge": "node backend/bridge/eastmoney_sim_bridge.mjs",
+    "discord:commands": "node backend/scripts/print_discord_commands.mjs",
+    "discord:register": "node backend/scripts/register_discord_commands.mjs",
+    "ta:proxy:test": ".venv/bin/python3 backend/scripts/tradingagents_proxy.py"
+  }
+}

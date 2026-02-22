@@ -1,0 +1,3 @@
+display_name: A-Share Sim Lab
+short_description: Build and iterate a multi-agent A-share simulation trading workflow with risk controls, review, and Eastmoney bridge scaffolding.
+default_prompt: Improve the local A-share simulation trading lab. Keep risk controls strict, preserve review logs, and treat Eastmoney integration as a local bridge adapter with approval-first execution.
