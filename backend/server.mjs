@@ -3,7 +3,9 @@ import { URL } from 'node:url';
 import { buildWorkflow } from './orchestrator.mjs';
 import { loadState, saveState } from './store.mjs';
 import { createCommandRouter } from './lib/command_router.mjs';
+import { defaultPortfolioLedger } from './lib/portfolio_ledger.mjs';
 import { interactionMessage, interactionPong, parseComponentCommand, parseDiscordInteraction, readRawBody, verifyDiscordRequestRawEd25519 } from './lib/discord_interactions.mjs';
+import { extractOpenClawCommands, toOpenClawResponse, verifyLocalOrSecretRequest, verifyOpenClawRequest } from './lib/openclaw_adapter.mjs';
 
 const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || '127.0.0.1';
@@ -37,6 +39,19 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/receipts') return json(res, 200, state.receipts.slice(0, 50));
     if (req.method === 'GET' && url.pathname === '/api/portfolio') return json(res, 200, state.portfolio || {});
     if (req.method === 'GET' && url.pathname === '/api/discord/commands') return json(res, 200, router.listDiscordSlashCommands());
+    if (req.method === 'GET' && url.pathname === '/api/openclaw/info') {
+      return json(res, 200, {
+        ok: true,
+        endpoint: '/webhooks/openclaw',
+        accepts: ['command', 'commands[]', 'action+params', 'content', 'input.text'],
+        examples: [
+          { action: 'STATUS' },
+          { action: 'RUN', symbol: '600519.SH', mode: 'hybrid' },
+          { action: 'APPROVE', decisionId: 'uuid' },
+          { commands: ['STATUS', 'LIST decisions'] }
+        ]
+      });
+    }
 
     if (req.method === 'POST' && url.pathname === '/api/workflow/run') {
       const body = await readJson(req);
@@ -57,10 +72,34 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && url.pathname === '/api/config') {
+      const verify = verifyLocalOrSecretRequest({
+        headers: req.headers,
+        remoteAddress: req.socket?.remoteAddress,
+        secret: process.env.OPENCLAW_SHARED_SECRET || ''
+      });
+      if (!verify.ok) return json(res, 401, { ok: false, error: verify.error });
       const body = await readJson(req);
       state.config = { ...state.config, ...(body || {}) };
       saveState(state);
       return json(res, 200, state.config);
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/reset') {
+      const verify = verifyLocalOrSecretRequest({
+        headers: req.headers,
+        remoteAddress: req.socket?.remoteAddress,
+        secret: process.env.OPENCLAW_SHARED_SECRET || ''
+      });
+      if (!verify.ok) return json(res, 401, { ok: false, error: verify.error });
+
+      state.workflows = [];
+      state.decisions = [];
+      state.approvals = [];
+      state.receipts = [];
+      state.messages = [];
+      state.portfolio = defaultPortfolioLedger();
+      saveState(state);
+      return json(res, 200, { ok: true, reset: true, configPreserved: true });
     }
 
     if (req.method === 'POST' && url.pathname === '/webhooks/discord/commands') {
@@ -69,6 +108,36 @@ const server = http.createServer(async (req, res) => {
       const results = [];
       for (const cmd of commands) results.push(await router.handleCommand(cmd, 'discord'));
       return json(res, 200, { ok: true, commands, results });
+    }
+
+    if (req.method === 'POST' && url.pathname === '/webhooks/openclaw') {
+      const secret = process.env.OPENCLAW_SHARED_SECRET || '';
+      const localOrSecret = verifyLocalOrSecretRequest({
+        headers: req.headers,
+        remoteAddress: req.socket?.remoteAddress,
+        secret
+      });
+      if (!localOrSecret.ok) return json(res, 401, { ok: false, error: localOrSecret.error });
+
+      const verify = verifyOpenClawRequest(req.headers, secret);
+      if (!verify.ok) return json(res, 401, { ok: false, error: verify.error });
+
+      const body = await readJson(req);
+      const extracted = extractOpenClawCommands(body, router.parseCommand);
+      if (extracted.parsed.length === 0) {
+        return json(res, 400, {
+          ok: false,
+          error: 'no_openclaw_command_found',
+          acceptedShapes: ['command', 'commands[]', 'action+params', 'content', 'input.text']
+        });
+      }
+      const results = [];
+      for (const cmd of extracted.parsed) results.push(await router.handleCommand(cmd, 'openclaw'));
+      return json(res, 200, toOpenClawResponse({
+        commands: extracted.parsed,
+        results,
+        globalPendingCount: state.decisions.filter((d) => d.status === 'pending_approval').length
+      }));
     }
 
     if (req.method === 'POST' && url.pathname === '/api/discord/message-preview') {
@@ -183,4 +252,7 @@ function hydrateConfigFromEnv() {
   }
   if (process.env.DISCORD_APPLICATION_ID) state.config.discord.applicationId = process.env.DISCORD_APPLICATION_ID;
   if (process.env.DISCORD_GUILD_ID) state.config.discord.guildId = process.env.DISCORD_GUILD_ID;
+  if (process.env.OPENCLAW_SHARED_SECRET) {
+    state.config.openclaw = { ...(state.config.openclaw || {}), authEnabled: true };
+  }
 }

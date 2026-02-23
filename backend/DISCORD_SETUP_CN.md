@@ -21,18 +21,26 @@
 2. 用 `POST /webhooks/discord/commands` 进行命令模拟
 3. 确认逻辑正确后，再用隧道（如 cloudflared/ngrok）暴露 `/webhooks/discord/interactions`
 
-## 命令注册
+## 命令注册（推荐一键方式）
 
-先填 `.env`：
+先填项目根目录的 `.env.local`：
 
 - `DISCORD_APPLICATION_ID`
 - `DISCORD_BOT_TOKEN`
 - `DISCORD_GUILD_ID`
+- `DISCORD_PUBLIC_KEY`
 
-然后执行：
+然后在项目根目录执行：
 
 ```bash
-node backend/scripts/register_discord_commands.mjs
+npm run discord:check
+npm run discord:register:local
+```
+
+查看当前读取到的 Discord 配置（会打码）：
+
+```bash
+npm run discord:whoami
 ```
 
 ## 已支持命令
@@ -60,3 +68,18 @@ node backend/scripts/register_discord_commands.mjs
 - 默认保持 `manualApproval=true`
 - 默认 `EASTMONEY_BRIDGE_SIMULATE=true`
 - 真正接东方财富模拟盘桥接时，先只打通回执，不要直接全自动连发
+
+## 接入真实 Discord Interactions（公网回调）
+
+Discord 不会请求你的 `127.0.0.1`，需要一个公网 URL 转发到本机：
+
+- 本地目标：`http://127.0.0.1:8787/webhooks/discord/interactions`
+
+你可以用任意隧道工具（如 `cloudflared` / `ngrok`）。拿到公网 URL 后，在 Discord Developer Portal 的 `General Information` 页面填写：
+
+- `Interactions Endpoint URL = https://your-public-host/webhooks/discord/interactions`
+
+保存通过后，再在 Discord 中测试：
+
+- `/status`
+- `/run symbol:600519.SH mode:hybrid`

@@ -6,8 +6,15 @@
   "scripts": {
     "start:orchestrator": "node backend/server.mjs",
     "start:bridge": "node backend/bridge/eastmoney_sim_bridge.mjs",
+    "glm": "sh scripts/start-orchestrator-glm.sh",
+    "bridge:8100": "sh scripts/start-bridge-8100.sh",
+    "test:run": "sh scripts/test-run.sh",
+    "test:openclaw": "sh scripts/test-openclaw.sh",
+    "discord:check": "sh scripts/discord-check.sh",
+    "discord:whoami": "sh scripts/discord-whoami.sh",
     "discord:commands": "node backend/scripts/print_discord_commands.mjs",
     "discord:register": "node backend/scripts/register_discord_commands.mjs",
+    "discord:register:local": "sh scripts/discord-register-local.sh",
     "ta:proxy:test": ".venv/bin/python3 backend/scripts/tradingagents_proxy.py"
   }
 }

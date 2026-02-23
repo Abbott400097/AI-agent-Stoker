@@ -7,6 +7,7 @@ Modes:
 """
 import json
 import os
+import signal
 import sys
 from pathlib import Path
 
@@ -52,13 +53,20 @@ def main() -> int:
             config['max_debate_rounds'] = int(os.getenv('TRADINGAGENTS_MAX_DEBATE_ROUNDS', '1'))
         except ValueError:
             pass
+    if os.getenv('TRADINGAGENTS_MAX_RISK_DISCUSS_ROUNDS'):
+        try:
+            config['max_risk_discuss_rounds'] = int(os.getenv('TRADINGAGENTS_MAX_RISK_DISCUSS_ROUNDS', '1'))
+        except ValueError:
+            pass
 
     # TradingAgents examples use US tickers. For A-share symbols, allow alias via env mapping or fallback raw code.
     company_name = map_symbol_for_tradingagents(symbol)
+    selected_analysts = parse_selected_analysts()
+    timeout_secs = int(os.getenv('TRADINGAGENTS_PROXY_TIMEOUT_SECS', '45'))
 
     try:
-        ta = TradingAgentsGraph(debug=False, config=config)
-        final_state, decision = ta.propagate(company_name, trade_date)
+        ta = TradingAgentsGraph(debug=False, config=config, selected_analysts=selected_analysts)
+        final_state, decision = run_with_timeout(lambda: ta.propagate(company_name, trade_date), timeout_secs)
         emit(normalize_result(symbol, company_name, trade_date, final_state, decision))
         return 0
     except Exception as e:
@@ -77,8 +85,37 @@ def map_symbol_for_tradingagents(symbol: str) -> str:
         except Exception:
             pass
 
-    # Default: strip exchange suffix for A-share code; caller may still fail if data vendor doesn't support it.
+    # Default: convert CN suffixes to yfinance-compatible suffixes where possible.
+    upper = symbol.upper()
+    if upper.endswith('.SH'):
+        return upper.replace('.SH', '.SS')
+    if upper.endswith('.SZ'):
+        return upper
+
+    # Fallback: strip suffix.
     return symbol.split('.')[0]
+
+
+def parse_selected_analysts():
+    raw = os.getenv('TRADINGAGENTS_SELECTED_ANALYSTS', 'market,news').strip()
+    items = [x.strip() for x in raw.split(',') if x.strip()]
+    return items or ['market', 'news']
+
+
+def run_with_timeout(fn, timeout_secs: int):
+    if timeout_secs <= 0:
+        return fn()
+
+    def _handler(signum, frame):  # noqa: ARG001
+        raise TimeoutError(f'tradingagents_proxy_timeout:{timeout_secs}s')
+
+    old_handler = signal.signal(signal.SIGALRM, _handler)
+    signal.alarm(timeout_secs)
+    try:
+        return fn()
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old_handler)
 
 
 def normalize_result(symbol: str, company_name: str, trade_date: str, final_state, decision):

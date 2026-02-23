@@ -25,6 +25,11 @@ const defaultState = () => ({
       applicationId: '',
       guildId: '',
       interactionsPath: '/webhooks/discord/interactions'
+    },
+    openclaw: {
+      enabled: true,
+      webhookPath: '/webhooks/openclaw',
+      authEnabled: false
     }
   }
 });
@@ -49,7 +54,8 @@ export function loadState() {
       config: {
         ...defaultState().config,
         ...(parsed.config || {}),
-        discord: { ...defaultState().config.discord, ...(parsed.config?.discord || {}) }
+        discord: { ...defaultState().config.discord, ...(parsed.config?.discord || {}) },
+        openclaw: { ...defaultState().config.openclaw, ...(parsed.config?.openclaw || {}) }
       },
       portfolio: { ...defaultPortfolioLedger(), ...(parsed.portfolio || {}) }
     };

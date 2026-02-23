@@ -63,22 +63,40 @@ function fallbackInsights({ symbol, mode, market, reason }) {
 
 async function execPythonProxy(payload) {
   return new Promise((resolve) => {
+    const timeoutMs = Number(process.env.TRADINGAGENTS_PROXY_TIMEOUT_MS || 50000);
     const pythonBin = fs.existsSync(LOCAL_VENV_PY) ? LOCAL_VENV_PY : 'python3';
     const proc = spawn(pythonBin, [PY_PROXY], {
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd: process.cwd(),
       env: {
         ...process.env,
-        PYTHONUNBUFFERED: '1'
+        PYTHONUNBUFFERED: '1',
+        TRADINGAGENTS_PROXY_TIMEOUT_SECS: process.env.TRADINGAGENTS_PROXY_TIMEOUT_SECS || '45',
+        TRADINGAGENTS_SELECTED_ANALYSTS: process.env.TRADINGAGENTS_SELECTED_ANALYSTS || 'market,news'
       }
     });
 
     let out = '';
     let err = '';
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      proc.kill('SIGKILL');
+      resolve({ ok: false, error: `proxy_timeout_${timeoutMs}ms` });
+    }, timeoutMs);
     proc.stdout.on('data', (d) => (out += String(d)));
     proc.stderr.on('data', (d) => (err += String(d)));
-    proc.on('error', (e) => resolve({ ok: false, error: e.message }));
+    proc.on('error', (e) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ ok: false, error: e.message });
+    });
     proc.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       if (code !== 0) return resolve({ ok: false, error: `proxy_exit_${code}:${err.trim()}` });
       try {
         resolve(JSON.parse(out));

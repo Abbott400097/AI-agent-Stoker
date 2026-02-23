@@ -1,12 +1,13 @@
 # C方案后端骨架（TradingAgents + AI-Trader 混合）
 
-这个目录是一个本地 orchestrator 骨架，用来承载你要的“多 agent 协作 + 可视化工作流 + Discord 命令/审批 + 东方财富模拟盘桥接”。
+这个目录是一个本地 orchestrator 骨架，用来承载你要的“多 agent 协作 + 可视化工作流 + OpenClaw 主控 + 东方财富模拟盘桥接”（Discord 为可选入口）。
 
 ## 已包含能力（骨架版）
 
 - 多 agent 工作流编排（intel / retrieval / analysis / debate / trader / risk / PM）
 - 可追溯工作流结果（JSON）
 - 审批队列（pending_approval）
+- OpenClaw webhook 接口（结构化命令：`RUN` / `APPROVE` / `REJECT` / `STATUS` / `LIST`）
 - Discord 命令 webhook 接口（命令式：`RUN` / `APPROVE` / `REJECT` / `STATUS`）
 - Discord 决策消息预览（embed payload）
 - Discord interactions 接口（slash command + 按钮 custom_id）
@@ -30,6 +31,8 @@ npm run start:orchestrator
 - `GET /api/workflow/latest` 查看最近一次工作流
 - `GET /api/decisions` 查看待审批/历史决策
 - `POST /api/decisions/approve` 审批并发送到桥接器（当前模拟）
+- `POST /webhooks/openclaw` 接收 OpenClaw 命令（文本或结构化 payload）
+- `GET /api/openclaw/info` 查看 OpenClaw webhook 支持的 payload 格式
 - `POST /webhooks/discord/commands` 接收 Discord 命令（文本或适配后的 slash command payload）
 - `POST /webhooks/discord/interactions` 接收 Discord 官方 interactions（签名校验）
 - `POST /api/discord/message-preview` 生成 Discord embed 预览（用于审批消息）
@@ -62,7 +65,8 @@ npm run start:orchestrator
 2. 把风控校验移植为 A股规则引擎（借鉴 `AI-Trader`）
 3. 把 `simulateBridgeSend()` 换成真实东方财富模拟盘本地桥接 HTTP 调用
 4. 给前端加 `/api/workflows` 可视化（节点耗时、证据、投票结果）
-5. 增加 Discord Bot/Gateway 适配器（把 slash command / 按钮交互转发到本服务）
+5. 增加 OpenClaw 可视化工作流节点映射（把本服务返回映射到 OpenClaw UI）
+6. （可选）增加 Discord Bot/Gateway 适配器（把 slash command / 按钮交互转发到本服务）
 
 ## 新增文件说明
 
@@ -70,10 +74,12 @@ npm run start:orchestrator
 - `lib/portfolio_ledger.mjs`: 本地持仓账本与成交落账（为T+1/仓位校验提供状态）
 - `lib/bridge_client.mjs`: 东方财富桥接发送客户端（默认模拟）
 - `lib/command_router.mjs`: 命令解析、审批执行、Discord消息格式化
+- `lib/openclaw_adapter.mjs`: OpenClaw webhook 解析与鉴权（可选 shared secret）
 - `lib/discord_interactions.mjs`: Discord interactions 签名校验/解析工具
 - `lib/tradingagents_adapter.mjs`: TradingAgents 适配器（默认回退，支持 python-proxy 模式）
 - `bridge/eastmoney_sim_bridge.mjs`: 东方财富模拟盘桥接 stub 服务（后续替换 Playwright/RPA）
 - `DISCORD_SETUP_CN.md`: Discord 接入步骤
+- `OPENCLAW_SETUP_CN.md`: OpenClaw 接入步骤（推荐主入口）
 
 ## 本地双服务运行（推荐）
 

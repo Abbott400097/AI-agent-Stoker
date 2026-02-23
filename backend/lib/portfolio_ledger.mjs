@@ -37,7 +37,10 @@ export function applyReceiptToPortfolio({ ledger, decision, receipt, tradeDate }
   const symbol = decision.symbol;
   const side = String(decision.side || '').toUpperCase();
   const qty = Number(decision.qty || 0);
-  const price = Number(decision.limitPrice || 0);
+  const receiptFillPrice = Number(receipt?.raw?.fillPrice ?? receipt?.fillPrice ?? NaN);
+  const price = Number.isFinite(receiptFillPrice) && receiptFillPrice > 0
+    ? receiptFillPrice
+    : Number(decision.limitPrice || 0);
   if (!symbol || !qty || !price) return { updated: false, reason: 'invalid_trade_fields' };
 
   ledger.positions ||= {};
