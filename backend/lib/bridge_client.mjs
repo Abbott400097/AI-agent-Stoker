@@ -1,6 +1,7 @@
 export async function sendDecisionToBridge(decision, config = {}) {
   const endpoint = config.bridgeEndpoint || 'http://127.0.0.1:8099/eastmoney-sim/order';
   const simulate = config.bridgeSimulate !== false;
+  const brokerProfile = String(config.brokerProfile || 'eastmoney-sim');
 
   if (simulate) {
     const accepted = Math.random() > 0.08;
@@ -21,8 +22,19 @@ export async function sendDecisionToBridge(decision, config = {}) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        broker: 'eastmoney-sim',
+        schemaVersion: '1.0',
+        broker: brokerProfile,
+        brokerProfile,
         orderId: decision.decisionId,
+        orderIntent: {
+          symbol: decision.symbol,
+          side: decision.side,
+          qty: decision.qty,
+          orderType: 'LIMIT',
+          limitPrice: decision.limitPrice,
+          tif: 'DAY',
+          market: 'CN-A'
+        },
         order: {
           symbol: decision.symbol,
           side: decision.side,
@@ -44,7 +56,7 @@ export async function sendDecisionToBridge(decision, config = {}) {
     return {
       id: cryptoRandomId(),
       decisionId: decision.decisionId,
-      broker: 'eastmoney-sim-bridge',
+      broker: `${brokerProfile}-bridge`,
       endpoint,
       accepted: response.ok && body.accepted !== false,
       message: body.message || `bridge http ${response.status}`,
@@ -57,7 +69,7 @@ export async function sendDecisionToBridge(decision, config = {}) {
     return {
       id: cryptoRandomId(),
       decisionId: decision.decisionId,
-      broker: 'eastmoney-sim-bridge',
+      broker: `${brokerProfile}-bridge`,
       endpoint,
       accepted: false,
       message: `bridge error: ${error.message}`,

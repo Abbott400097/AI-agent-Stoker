@@ -21,6 +21,12 @@ const server = http.createServer(async (req, res) => {
       appendJsonl(LOG_FILE, receipt);
       return json(res, 200, receipt);
     }
+    if (req.method === 'POST' && req.url === '/broker/order') {
+      const body = await readJson(req);
+      const receipt = evaluateAndSimulate(body);
+      appendJsonl(LOG_FILE, receipt);
+      return json(res, 200, receipt);
+    }
 
     if (req.method === 'GET' && req.url === '/eastmoney-sim/receipts') {
       const receipts = readTailJsonl(LOG_FILE, 50);
@@ -38,12 +44,13 @@ server.listen(PORT, HOST, () => {
 });
 
 function evaluateAndSimulate(payload) {
-  const order = payload?.order || {};
+  const order = payload?.orderIntent || payload?.order || {};
   const symbol = String(order.symbol || '').toUpperCase();
   const side = String(order.side || '').toUpperCase();
   const qty = Number(order.qty || 0);
   const limitPrice = Number(order.limitPrice || order.suggestedPrice || 0);
   const orderId = String(payload?.orderId || `ord_${Date.now()}`);
+  const brokerProfile = String(payload?.brokerProfile || payload?.broker || 'eastmoney-sim');
 
   const reasons = [];
   if (!symbol) reasons.push('missing_symbol');
@@ -62,6 +69,7 @@ function evaluateAndSimulate(payload) {
     accepted,
     message: accepted ? 'eastmoney sim bridge accepted' : `rejected:${reasons.join(',')}`,
     orderId,
+    brokerProfile,
     brokerOrderId: accepted ? `EMSIM-${Date.now()}-${Math.floor(Math.random() * 1000)}` : null,
     symbol,
     side,

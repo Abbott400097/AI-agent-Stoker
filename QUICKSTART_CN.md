@@ -94,6 +94,101 @@ curl http://127.0.0.1:8787/api/openclaw/info
 
 - `/Users/charles/Documents/New project/backend/OPENCLAW_SETUP_CN.md`
 
+## 一键运行（盘中巡航 + 收盘复盘骨架）
+
+你说的目标是对的：不是手工一条条 `RUN`，而是盘中动态巡航、收盘复盘、自我微调。
+
+本项目现在已经有一个轻量 `autopilot` 骨架：
+
+- 识别 A 股交易时段（北京时间）
+- 盘中按频率轮询标的（默认 `defaultUniverse`）
+- 收盘后自动生成 EOD review（复盘摘要 + 参数建议）
+- 可选择是否自动审批（默认关闭，建议先人工）
+
+### 一键启动整套（bridge + orchestrator）
+
+```bash
+cd "/Users/charles/Documents/New project"
+npm run lab
+```
+
+> 这会在同一个终端里前台跑 orchestrator，并在后台带起 bridge。
+
+### 启动自动巡航
+
+新开一个终端：
+
+```bash
+cd "/Users/charles/Documents/New project"
+npm run autopilot:start
+```
+
+查看状态：
+
+```bash
+npm run autopilot:status
+```
+
+手动触发一次巡航（便于测试）：
+
+```bash
+npm run autopilot:tick
+```
+
+停止巡航：
+
+```bash
+npm run autopilot:stop
+```
+
+### OpenClaw 侧怎么用（推荐）
+
+- 日常聊天 / 询问状态：OpenClaw Dashboard
+- 执行动作：调用本地 `/webhooks/openclaw`
+- 巡航状态：`GET /api/autopilot/status`
+- 收盘复盘：`GET /api/reviews` 或 `POST /api/autopilot/review`
+
+也可以直接走 OpenClaw webhook 动作（不用命令行）：
+
+```bash
+curl -X POST http://127.0.0.1:8787/webhooks/openclaw -H 'Content-Type: application/json' -d '{"action":"AUTOPILOT_STATUS"}'
+curl -X POST http://127.0.0.1:8787/webhooks/openclaw -H 'Content-Type: application/json' -d '{"action":"AUTOPILOT_START"}'
+curl -X POST http://127.0.0.1:8787/webhooks/openclaw -H 'Content-Type: application/json' -d '{"action":"AUTOPILOT_TICK"}'
+curl -X POST http://127.0.0.1:8787/webhooks/openclaw -H 'Content-Type: application/json' -d '{"action":"AUTOPILOT_REVIEW"}'
+```
+
+### 当前限制（实话实说）
+
+- 盘中市场数据现在还是“模拟市场生成器 + 适配器信息”，不是实时报价接口
+- `TradingAgents + GLM` 仍可能超时后 fallback
+- 所以现在是“自动化骨架已成”，下一步要接真实数据源和更稳的模型路径
+
+## 真实分钟数据（优先结构化，不用截图）
+
+已内置 `AKShare proxy` 接口（Node 调 Python）：
+
+1. 安装 AKShare（在项目虚拟环境里）
+
+```bash
+cd "/Users/charles/Documents/New project"
+.venv/bin/pip install akshare
+```
+
+2. 把 `.env.local` 改成：
+
+```bash
+MARKET_DATA_PROVIDER=akshare-proxy
+```
+
+3. 重启 orchestrator（`npm run glm` 或 `npm run lab`）
+
+4. 测试 market proxy（可选）
+
+```bash
+cd "/Users/charles/Documents/New project"
+printf '{"symbol":"600519.SH"}' | .venv/bin/python3 backend/scripts/market_data_proxy.py
+```
+
 ## Discord 跑通（可选，非主入口）
 
 先在 Discord Developer Portal 创建 App + Bot，并拿到：

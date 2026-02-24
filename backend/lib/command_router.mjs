@@ -74,7 +74,7 @@ export function createCommandRouter({ getState, save, buildWorkflow }) {
     handleMessageLog(source, command);
 
     if (command.cmd === 'RUN') {
-      const workflow = buildWorkflow({ symbol: command.symbol, mode: command.mode || 'hybrid', state });
+      const workflow = buildWorkflow({ symbol: command.symbol, mode: command.mode || 'hybrid', state, source });
       const resolvedWorkflow = await workflow;
       markSymbolPrice(state.portfolio, resolvedWorkflow.symbol, resolvedWorkflow.market?.lastPrice);
       appendCapped(state.workflows, resolvedWorkflow, 100);

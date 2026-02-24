@@ -11,9 +11,18 @@ const defaultState = () => ({
   approvals: [],
   receipts: [],
   messages: [],
+  reviews: [],
+  screener: {
+    candidates: [],
+    manualSymbols: [],
+    lastRun: null,
+    lastError: null,
+    lastResult: null
+  },
   portfolio: defaultPortfolioLedger(),
   config: {
     brokerMode: 'eastmoney-bridge',
+    brokerProfile: 'eastmoney-sim',
     bridgeEndpoint: 'http://127.0.0.1:8099/eastmoney-sim/order',
     bridgeSimulate: true,
     manualApproval: true,
@@ -30,6 +39,31 @@ const defaultState = () => ({
       enabled: true,
       webhookPath: '/webhooks/openclaw',
       authEnabled: false
+    },
+    autopilot: {
+      enabled: false,
+      pollSecs: 60,
+      autoApprove: false,
+      intradayEnabled: true,
+      eodReviewEnabled: true,
+      universe: []
+    },
+    marketData: {
+      provider: 'mock',
+      baseUrl: '',
+      pollResolution: '1m'
+    },
+    tradingagents: {
+      enabled: true,
+      intradayEnabled: false,
+      manualRunEnabled: true
+    },
+    screener: {
+      enabled: false,
+      topN: 8,
+      minScore: 0.48,
+      autoApplyToAutopilot: true,
+      universe: []
     }
   }
 });
@@ -55,9 +89,14 @@ export function loadState() {
         ...defaultState().config,
         ...(parsed.config || {}),
         discord: { ...defaultState().config.discord, ...(parsed.config?.discord || {}) },
-        openclaw: { ...defaultState().config.openclaw, ...(parsed.config?.openclaw || {}) }
+        openclaw: { ...defaultState().config.openclaw, ...(parsed.config?.openclaw || {}) },
+        autopilot: { ...defaultState().config.autopilot, ...(parsed.config?.autopilot || {}) },
+        marketData: { ...defaultState().config.marketData, ...(parsed.config?.marketData || {}) },
+        tradingagents: { ...defaultState().config.tradingagents, ...(parsed.config?.tradingagents || {}) },
+        screener: { ...defaultState().config.screener, ...(parsed.config?.screener || {}) }
       },
-      portfolio: { ...defaultPortfolioLedger(), ...(parsed.portfolio || {}) }
+      portfolio: { ...defaultPortfolioLedger(), ...(parsed.portfolio || {}) },
+      screener: { ...defaultState().screener, ...(parsed.screener || {}) }
     };
   } catch {
     const state = defaultState();

@@ -2,26 +2,20 @@ import crypto from 'node:crypto';
 import { normalizeAshareSymbol } from './lib/a_share_rules.mjs';
 import { getTradingAgentsInsights } from './lib/tradingagents_adapter.mjs';
 import { positionQty } from './lib/portfolio_ledger.mjs';
+import { getMarketSnapshot } from './lib/market_data_provider.mjs';
+import { computeIndicatorPack } from './lib/indicator_engine.mjs';
 
-const DEFAULT_SYMBOLS = {
-  '600519.SH': { name: '贵州茅台', sector: '消费' },
-  '601318.SH': { name: '中国平安', sector: '金融' },
-  '600036.SH': { name: '招商银行', sector: '金融' },
-  '600276.SH': { name: '恒瑞医药', sector: '医药' },
-  '601899.SH': { name: '紫金矿业', sector: '资源' },
-  '300750.SZ': { name: '宁德时代', sector: '新能源' }
-};
-
-export async function buildWorkflow({ symbol = '600519.SH', mode = 'hybrid', state }) {
+export async function buildWorkflow({ symbol = '600519.SH', mode = 'hybrid', state, source = 'api' }) {
   symbol = normalizeAshareSymbol(symbol);
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  const market = synthesizeMarket(symbol, mode);
-  const taInsights = await getTradingAgentsInsights({ symbol, mode, market });
+  const market = await getMarketSnapshot({ symbol, mode, config: state?.config || {} });
+  const indicators = computeIndicatorPack(market);
+  const taInsights = await maybeGetTradingAgentsInsights({ symbol, mode, market, state, source });
 
-  const intel = intelAgent(market);
-  const retrieval = retrievalAgent(symbol, market, taInsights);
-  const analysis = analysisSquad(symbol, market, retrieval.payload.evidence || [], taInsights);
+  const intel = intelAgent(market, indicators);
+  const retrieval = retrievalAgent(symbol, market, indicators, taInsights);
+  const analysis = analysisSquad(symbol, market, indicators, retrieval.payload.evidence || [], taInsights);
   const debate = debateAgents(analysis, taInsights);
   const trader = traderAgent(symbol, market, analysis, debate, state?.portfolio);
   const risk = riskAgent(trader, state.config, state?.portfolio);
@@ -54,6 +48,7 @@ export async function buildWorkflow({ symbol = '600519.SH', mode = 'hybrid', sta
     mode,
     createdAt: now,
     market,
+    indicators,
     adapter: { tradingagents: { source: taInsights.source, ok: taInsights.ok, reason: taInsights.reason || null } },
     steps,
     final: {
@@ -68,37 +63,55 @@ export async function buildWorkflow({ symbol = '600519.SH', mode = 'hybrid', sta
   };
 }
 
-function synthesizeMarket(symbol, mode) {
-  const base = 80 + Math.random() * 1800;
-  const trend = (Math.random() - 0.5) * (mode === 'trend' ? 0.08 : mode === 'pullback' ? 0.05 : 0.07);
-  const intraday = (Math.random() - 0.5) * 0.04;
-  const lastPrice = round2(base * (1 + trend + intraday));
-  const dayChangePct = round2((trend + intraday) * 100);
-  const turnoverHeat = clamp(0.25 + Math.random() * 0.65, 0, 1);
-  const sentiment = clamp(0.2 + Math.random() * 0.7 + dayChangePct / 30, 0, 1);
-  const sectorHeat = clamp(0.2 + Math.random() * 0.75, 0, 1);
+async function maybeGetTradingAgentsInsights({ symbol, mode, market, state, source }) {
+  const cfg = state?.config?.tradingagents || {};
+  const src = String(source || '');
+  const isAutopilot = src.startsWith('autopilot:');
+  const enabled = cfg.enabled !== false;
+  const intradayEnabled = cfg.intradayEnabled === true;
+  const manualRunEnabled = cfg.manualRunEnabled !== false;
+
+  if (!enabled) {
+    return disabledTaInsights('disabled_by_config');
+  }
+  if (isAutopilot && !intradayEnabled) {
+    return disabledTaInsights('disabled_intraday');
+  }
+  if (!isAutopilot && !manualRunEnabled) {
+    return disabledTaInsights('disabled_manual');
+  }
+  return getTradingAgentsInsights({ symbol, mode, market });
+}
+
+function disabledTaInsights(reason) {
   return {
-    symbol,
-    ...DEFAULT_SYMBOLS[symbol],
-    lastPrice,
-    dayChangePct,
-    turnoverHeat: round2(turnoverHeat),
-    sentiment: round2(sentiment),
-    sectorHeat: round2(sectorHeat),
-    regime: sentiment > 0.65 ? 'risk-on' : sentiment < 0.35 ? 'risk-off' : 'range'
+    ok: false,
+    source: 'disabled',
+    reason,
+    analysts: {
+      market: { score: 0.5, summary: 'disabled' },
+      news: { score: 0.5, summary: 'disabled' },
+      fundamentals: { score: 0.5, summary: 'disabled' },
+      social: { score: 0.5, summary: 'disabled' }
+    },
+    debate: { bull: 0.5, bear: 0.5 },
+    trader: { actionBias: 'hybrid', summary: 'TradingAgents disabled for this path' }
   };
 }
 
-function intelAgent(market) {
+function intelAgent(market, indicators) {
   return step('intel', {
-    summary: `市场状态 ${market.regime}，情绪 ${(market.sentiment * 100).toFixed(0)}%，板块热度 ${(market.sectorHeat * 100).toFixed(0)}%。`,
-    constraints: ['A股 T+1', '100股整数手', '涨跌停与流动性约束']
+    summary: `市场状态 ${market.regime}，数据源 ${market.source || 'unknown'}，情绪 ${(market.sentiment * 100).toFixed(0)}%，指标综合分 ${(indicators?.scores?.composite ?? 0.5).toFixed(2)}。`,
+    constraints: ['A股 T+1', '100股整数手', '涨跌停与流动性约束'],
+    marketSource: market.source || 'unknown',
+    asOf: market.asOf || null
   });
 }
 
-function retrievalAgent(symbol, market, taInsights) {
+function retrievalAgent(symbol, market, indicators, taInsights) {
   const evidence = [
-    { source: 'market_snapshot', title: `${symbol} 日内涨跌幅 ${signedPct(market.dayChangePct)}`, freshness: 'live-ish', score: 0.72 },
+    { source: `market_snapshot:${market.source || 'unknown'}`, title: `${symbol} 日内涨跌幅 ${signedPct(market.dayChangePct)} / 现价 ${market.lastPrice}`, freshness: market.asOf || 'runtime', score: 0.82 },
+    { source: 'indicator_engine', title: `趋势 ${indicators?.scores?.trend ?? '-'} / 动量 ${indicators?.scores?.momentum ?? '-'} / RSI ${indicators?.metrics?.rsi14 ?? '-'}`, freshness: market.asOf || 'runtime', score: 0.9 },
     { source: 'local_rules', title: 'A股规则: T+1 / 100股手数 / 审批后执行', freshness: 'static', score: 0.98 },
     { source: 'ai-trader_pattern', title: 'AI-Trader A股 BaseAgentAStock 规则与日志结构可复用', freshness: 'repo', score: 0.8 },
     { source: 'tradingagents_graph', title: 'TradingAgents LangGraph 多角色辩论链路可复用', freshness: 'repo', score: 0.85 }
@@ -108,23 +121,29 @@ function retrievalAgent(symbol, market, taInsights) {
   }
 
   return step('retrieval', {
-    summary: '检索Agent完成证据收集与去重，输出可追溯证据列表。',
+    summary: `检索Agent完成证据收集与去重（数据源: ${market.source || 'unknown'}），输出可追溯证据列表。`,
     evidence
   });
 }
 
-function analysisSquad(symbol, market, evidence, taInsights) {
+function analysisSquad(symbol, market, indicators, evidence, taInsights) {
   const ta = taInsights?.analysts || {};
-  const technicalScore = clamp((ta.market?.score ?? 0.5) * 0.35 + 0.5 + market.dayChangePct / 14 + (market.turnoverHeat - 0.5) * 0.35, 0, 1);
-  const eventScore = clamp((ta.news?.score ?? 0.5) * 0.4 + (ta.social?.score ?? 0.5) * 0.15 + 0.28 + (market.sentiment - 0.5) * 0.45 + (Math.random() - 0.5) * 0.1, 0, 1);
-  const liquidityScore = clamp((ta.social?.score ?? 0.5) * 0.25 + 0.35 + market.turnoverHeat * 0.55, 0, 1);
+  const indicatorComposite = Number(indicators?.scores?.composite ?? 0.5);
+  const technicalScore = clamp(
+    indicatorComposite * 0.55 +
+    Number(indicators?.scores?.trend ?? 0.5) * 0.25 +
+    (ta.market?.score ?? 0.5) * 0.2,
+    0, 1
+  );
+  const eventScore = clamp((ta.news?.score ?? 0.5) * 0.4 + (ta.social?.score ?? 0.5) * 0.15 + 0.28 + (market.sentiment - 0.5) * 0.35 + (Math.random() - 0.5) * 0.06, 0, 1);
+  const liquidityScore = clamp((ta.social?.score ?? 0.5) * 0.15 + Number(indicators?.scores?.liquidity ?? 0.5) * 0.45 + 0.15 + market.turnoverHeat * 0.25, 0, 1);
   const fundamentalScore = clamp((ta.fundamentals?.score ?? 0.5), 0, 1);
 
   return {
     steps: [
       step('analysis-tech', {
-        summary: `${symbol} 技术面评分 ${technicalScore.toFixed(2)}。`,
-        metrics: { technicalScore, dayChangePct: market.dayChangePct, turnoverHeat: market.turnoverHeat }
+        summary: `${symbol} 指标/技术面评分 ${technicalScore.toFixed(2)}。`,
+        metrics: { technicalScore, indicatorComposite, dayChangePct: market.dayChangePct, turnoverHeat: market.turnoverHeat, ...indicators?.metrics }
       }),
       step('analysis-event', {
         summary: `事件/情绪评分 ${eventScore.toFixed(2)}。`,
@@ -165,12 +184,12 @@ function debateAgents(analysis, taInsights) {
 function traderAgent(symbol, market, analysis, debate, portfolio) {
   const heldQty = positionQty(portfolio, symbol);
   const conviction = clamp(
-    analysis.scores.technicalScore * 0.35 +
-      analysis.scores.eventScore * 0.25 +
-      analysis.scores.liquidityScore * 0.15 +
-      analysis.scores.fundamentalScore * 0.1 +
-      debate.bull * 0.2 -
-      debate.bear * 0.1,
+    analysis.scores.technicalScore * 0.4 +
+    analysis.scores.eventScore * 0.25 +
+    analysis.scores.liquidityScore * 0.15 +
+    analysis.scores.fundamentalScore * 0.1 +
+    debate.bull * 0.15 -
+    debate.bear * 0.1,
     0,
     1
   );

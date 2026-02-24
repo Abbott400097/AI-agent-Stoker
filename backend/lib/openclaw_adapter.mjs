@@ -1,3 +1,5 @@
+import { attachOpenClawVisualsToResults, buildOpenClawVisualFromResult, buildOpenClawVisualSummary } from './openclaw_view.mjs';
+
 export function verifyOpenClawRequest(headers, secret) {
   if (!secret) return { ok: true, skipped: true };
   const auth = headers.authorization || '';
@@ -50,9 +52,31 @@ export function extractOpenClawCommands(body, parseCommand) {
   return { texts, parsed };
 }
 
+export function parseOpenClawControlAction(body) {
+  const action = String(body?.action || body?.cmd || '').toUpperCase();
+  if (!action) return null;
+  const mapped = {
+    AUTOPILOT_START: 'autopilot_start',
+    AUTOPILOT_STOP: 'autopilot_stop',
+    AUTOPILOT_STATUS: 'autopilot_status',
+    AUTOPILOT_TICK: 'autopilot_tick',
+    AUTOPILOT_REVIEW: 'autopilot_review',
+    SCREENER_RUN: 'screener_run',
+    SCREENER_STATUS: 'screener_status',
+    SCREENER_LIST: 'screener_status',
+    SCREENER_ADD: 'screener_add',
+    SCREENER_REMOVE: 'screener_remove',
+    REVIEWS: 'reviews',
+    PORTFOLIO: 'portfolio'
+  }[action];
+  if (!mapped) return null;
+  return { type: mapped, body };
+}
+
 export function toOpenClawResponse({ commands, results, globalPendingCount }) {
+  const visualizedResults = attachOpenClawVisualsToResults(results);
   const pending = [];
-  for (const result of results || []) {
+  for (const result of visualizedResults || []) {
     if (result?.type === 'workflow' && result?.decisionId) {
       pending.push({
         decisionId: result.decisionId,
@@ -67,12 +91,23 @@ export function toOpenClawResponse({ commands, results, globalPendingCount }) {
     ok: true,
     channel: 'openclaw',
     commands,
-    results,
+    results: visualizedResults,
+    visual: buildOpenClawVisualSummary(visualizedResults),
     approvals: {
       pendingCount: Number.isFinite(Number(globalPendingCount)) ? Number(globalPendingCount) : pending.length,
       currentRequestPendingCount: pending.length,
       pending
     }
+  };
+}
+
+export function toOpenClawControlResponse(result) {
+  return {
+    ok: true,
+    channel: 'openclaw',
+    control: true,
+    result,
+    visual: buildOpenClawVisualFromResult(result)
   };
 }
 
